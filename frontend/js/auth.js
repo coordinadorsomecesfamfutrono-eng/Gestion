@@ -10,6 +10,8 @@ const Auth = {
             if (response.ok) {
                 const data = await response.json();
                 localStorage.setItem('authToken', data.token);
+                localStorage.setItem('username', data.username || username);
+                localStorage.setItem('userRole', data.role || 'user');
                 return true;
             }
             return false;
@@ -21,6 +23,8 @@ const Auth = {
 
     logout: () => {
         localStorage.removeItem('authToken');
+        localStorage.removeItem('username');
+        localStorage.removeItem('userRole');
         window.location.href = 'login.html';
     },
 
@@ -35,6 +39,18 @@ const Auth = {
 
     getToken: () => {
         return localStorage.getItem('authToken');
+    },
+
+    getUsername: () => {
+        return localStorage.getItem('username') || 'Usuario';
+    },
+
+    getUserRole: () => {
+        return localStorage.getItem('userRole') || 'user';
+    },
+
+    isAdmin: () => {
+        return localStorage.getItem('userRole') === 'admin';
     },
 
     getHeaders: () => {

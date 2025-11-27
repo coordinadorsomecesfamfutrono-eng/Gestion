@@ -75,6 +75,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                 Management.renderProfesionalesList();
                 // Forzar recarga de establecimientos en el select
                 setTimeout(() => Management.cargarEstablecimientos(), 50);
+            } else if (btn.dataset.gestionTab === 'admin') {
+                AdminPanel.renderUsuarios();
             }
         });
     });
@@ -94,6 +96,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Cargar estado inicial de gestión
     // Inicializar Gestión (Carga datos de API)
     await Management.init();
+
+    // Inicializar AdminPanel (mostrar/ocultar pestaña según role)
+    AdminPanel.init();
 
     ConfigModals.renderEstablecimientos(); // Renderizar establecimientos por defecto
     // Evento: Guardar Distribución
