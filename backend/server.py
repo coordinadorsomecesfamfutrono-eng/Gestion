@@ -214,6 +214,27 @@ def check_auth():
 
 # --- Routes ---
 
+@app.route('/api/health', methods=['GET'])
+def health():
+    db = get_db()
+    db_type = 'TURSO' if isinstance(db, TursoDB) else 'LOCAL SQLITE'
+    
+    try:
+        res = db.fetch_one('SELECT count(*) as c FROM usuarios')
+        user_count = res['c'] if isinstance(res, dict) else res[0]
+        status = "OK"
+    except Exception as e:
+        user_count = -1
+        status = str(e)
+
+    return jsonify({
+        "status": status,
+        "db_type": db_type,
+        "turso_available": TURSO_AVAILABLE,
+        "user_count": user_count
+    })
+
+
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.json
