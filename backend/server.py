@@ -236,6 +236,35 @@ def health():
         "user_count": user_count
     })
 
+@app.route('/api/seed', methods=['GET'])
+def seed():
+    log = []
+    try:
+        db = get_db()
+        log.append(f"DB Type: {'TURSO' if isinstance(db, TursoDB) else 'LOCAL'}")
+        
+        # Check Users
+        res = db.fetch_one('SELECT count(*) as c FROM usuarios')
+        count = res['c'] if isinstance(res, dict) else res[0]
+        log.append(f"Usuarios count before: {count}")
+        
+        if count == 0:
+            pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
+            db.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
+            log.append("Admin user inserted")
+        else:
+            log.append("Admin user already exists")
+            
+        # Verify
+        res = db.fetch_one('SELECT count(*) as c FROM usuarios')
+        count_after = res['c'] if isinstance(res, dict) else res[0]
+        log.append(f"Usuarios count after: {count_after}")
+        
+        return jsonify({"status": "completed", "log": log})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e), "log": log}), 500
+
+
 
 @app.route('/api/login', methods=['POST'])
 def login():
