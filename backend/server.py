@@ -274,6 +274,28 @@ def seed():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e), "log": log}), 500
 
+@app.route('/api/quick-admin', methods=['GET'])
+def quick_admin():
+    """Endpoint super rapido: recrea admin SIN llamar init_db"""
+    try:
+        if TURSO_AVAILABLE and TURSO_URL and TURSO_TOKEN:
+            client = libsql_client.create_client_sync(url=TURSO_URL, auth_token=TURSO_TOKEN)
+            client.execute('DELETE FROM usuarios')
+            pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
+            client.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
+            return jsonify({"status": "ok", "message": "Admin recreated via Turso"})
+        else:
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            c.execute('DELETE FROM usuarios')
+            pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
+            c.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
+            conn.commit()
+            conn.close()
+            return jsonify({"status": "ok", "message": "Admin recreated via SQLite"})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
 @app.route('/api/force-admin', methods=['GET'])
 def force_admin():
     """Endpoint de emergencia: borra y recrea el usuario admin"""
