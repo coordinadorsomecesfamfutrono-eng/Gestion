@@ -137,12 +137,18 @@ const ConfigModals = {
         await Management.init(); // Recargar datos
         this.renderEstablecimientos();
         UI.showToast('Establecimiento agregado', 'success');
+        // Limpiar campos
+        document.getElementById('nuevoEstabNombre').value = '';
+        document.getElementById('nuevoEstabBoxes').value = '1';
       } else {
-        UI.showToast('Error al agregar (posiblemente nombre duplicado)', 'error');
+        const errorData = await response.json();
+        const errorMsg = errorData.error || 'Error al agregar';
+        console.error('Error del servidor:', errorMsg);
+        UI.showToast(errorMsg, 'error');
       }
     } catch (e) {
-      console.error(e);
-      UI.showToast('Error de conexión', 'error');
+      console.error('Error de conexión:', e);
+      UI.showToast('Error de conexión: ' + e.message, 'error');
     }
   },
 
