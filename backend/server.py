@@ -201,7 +201,8 @@ def init_db():
         print(f"Error inicializando base de datos: {e}")
 
 # Ejecutar init_db al inicio (en Vercel esto corre al arrancar la instancia)
-init_db()
+# DESACTIVADO: estaba causando timeouts en cada cold start
+# init_db()
 
 # --- Auth Helper ---
 def check_auth():
