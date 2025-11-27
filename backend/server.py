@@ -236,12 +236,14 @@ def setup():
         db = get_db()
         pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
         db.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
-        return jsonify({"status": "ok", "message": "Admin user created. You can now login with admin/cesfam2025"})
+        return jsonify({"status": "ok", "message": " Admin user created. You can now login with admin/cesfam2025"})
     except Exception as e:
+        error_msg = str(e)
+        print(f"Error in setup: {error_msg}")
         # Si ya existe, no es error
-        if "UNIQUE constraint failed" in str(e) or "already exists" in str(e).lower():
+        if "UNIQUE constraint failed" in error_msg or "already exists" in error_msg.lower():
             return jsonify({"status": "ok", "message": "Admin user already exists"})
-        return jsonify({"status": "error", "error": str(e)}), 500
+        return jsonify({"status": "error", "error": error_msg}), 500
 
 @app.route('/api/force-admin', methods=['GET'])
 def force_admin():
