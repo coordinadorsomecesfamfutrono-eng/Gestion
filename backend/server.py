@@ -149,17 +149,29 @@ def init_tables():
     """Crear todas las tablas - llamar UNA VEZ"""
     try:
         db = get_db()
-        db.execute('CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL)')
+        # Crear tablas con campo role en usuarios
+        db.execute('CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL, role TEXT DEFAULT \'user\')')
         db.execute('CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
         db.execute('CREATE TABLE IF NOT EXISTS distribuciones (id INTEGER PRIMARY KEY AUTOINCREMENT, mes INTEGER, anio INTEGER, data TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
         db.execute('CREATE TABLE IF NOT EXISTS establecimientos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT UNIQUE NOT NULL, boxes INTEGER DEFAULT 1, restriccion TEXT)')
         db.execute('CREATE TABLE IF NOT EXISTS profesionales (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, profesion TEXT NOT NULL, establecimientos TEXT, obs TEXT)')
         db.execute('CREATE TABLE IF NOT EXISTS rondas_minimas (id INTEGER PRIMARY KEY AUTOINCREMENT, profesion TEXT NOT NULL, establecimiento TEXT NOT NULL, cantidad INTEGER DEFAULT 0)')
+        
+        # Migración: agregar campo role a usuarios existentes si falta
+        try:
+            db.execute('ALTER TABLE usuarios ADD COLUMN role TEXT DEFAULT \'user\'')
+        except Exception as migration_error:
+            # Columna ya existe, ignorar
+            pass
+        
+        # Asegurar que admin tiene role='admin'
+        db.execute('UPDATE usuarios SET role = \'admin\' WHERE username = \'admin\'')
+        
         return jsonify({"status": "ok", "message": "All tables created successfully"})
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
-# --- Auth Helper ---
+# --- Auth Helpers ---
 def check_auth():
     auth_header = request.headers.get('Authorization')
     if not auth_header:
@@ -174,14 +186,49 @@ def check_auth():
     except:
         return False
 
+def get_current_user_id():
+    """Retorna el user_id del usuario autenticado actual, o None"""
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return None
+    
+    try:
+        token = auth_header.replace('Bearer ', '')
+        db = get_db()
+        session = db.fetch_one('SELECT user_id FROM sessions WHERE token = ?', (token,))
+        if session:
+            return session['user_id'] if isinstance(session, dict) else session[0]
+        return None
+    except:
+        return None
+
+def check_admin():
+    """Verifica si el usuario autenticado actual es admin"""
+    user_id = get_current_user_id()
+    if not user_id:
+        return False
+    
+    try:
+        db = get_db()
+        user = db.fetch_one('SELECT role FROM usuarios WHERE id = ?', (user_id,))
+        if user:
+            role = user['role'] if isinstance(user, dict) else user[0]
+            return role == 'admin'
+        return False
+    except:
+        return False
+
+
 # --- Routes ---
 
 @app.route('/api/health', methods=['GET'])
 def health():
-    db = get_db()
-    db_type = 'TURSO' if isinstance(db, TursoDB) else 'LOCAL SQLITE'
+    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
     
+    db_type = "TURSO" if (TURSO_AVAILABLE and TURSO_URL and TURSO_TOKEN) else "LOCAL SQLITE"
     try:
+        db = get_db()
+        
         # Usuarios
         res = db.fetch_one('SELECT count(*) as c FROM usuarios')
         user_count = res['c'] if isinstance(res, dict) else res[0]
@@ -212,62 +259,6 @@ def health():
         }
     })
 
-@app.route('/api/seed', methods=['GET'])
-@app.route('/api/seed', methods=['GET'])
-def seed():
-    log = []
-    try:
-        db = get_db()
-        log.append(f"DB Type: {'TURSO' if isinstance(db, TursoDB) else 'LOCAL'}")
-        
-        # 1. Usuarios (Solo creamos el admin si no existe)
-        res = db.fetch_one('SELECT count(*) as c FROM usuarios')
-        count = res['c'] if isinstance(res, dict) else res[0]
-        if count == 0:
-            pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
-            db.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
-            log.append("Admin user inserted")
-        else:
-            log.append(f"Usuarios exists ({count})")
-
-        return jsonify({"status": "completed", "log": log})
-    except Exception as e:
-        return jsonify({"status": "error", "error": str(e), "log": log}), 500
-
-@app.route('/api/setup', methods=['GET'])
-def setup():
-    """Crear usuario admin - llamar UNA VEZ después del deploy"""
-    try:
-        db = get_db()
-        pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
-        db.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
-        return jsonify({"status": "ok", "message": " Admin user created. You can now login with admin/cesfam2025"})
-    except Exception as e:
-        error_msg = str(e)
-        print(f"Error in setup: {error_msg}")
-        # Si ya existe, no es error
-        if "UNIQUE constraint failed" in error_msg or "already exists" in error_msg.lower():
-            return jsonify({"status": "ok", "message": "Admin user already exists"})
-        return jsonify({"status": "error", "error": error_msg}), 500
-
-@app.route('/api/force-admin', methods=['GET'])
-def force_admin():
-    """Endpoint de emergencia: borra y recrea el usuario admin"""
-    try:
-        db = get_db()
-        
-        # 1. Borrar todos los usuarios
-        db.execute('DELETE FROM usuarios')
-        
-        # 2. Crear admin con hash correcto
-        pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
-        db.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
-        
-        return jsonify({"status": "ok", "message": "Admin user recreated"})
-    except Exception as e:
-        return jsonify({"status": "error", "error": str(e)}), 500
-
-
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -277,16 +268,139 @@ def login():
     pwd_hash = hashlib.sha256(password.encode()).hexdigest()
     
     db = get_db()
-    user = db.fetch_one('SELECT id FROM usuarios WHERE username = ? AND password = ?', (username, pwd_hash))
+    user = db.fetch_one('SELECT id, username, role FROM usuarios WHERE username = ? AND password = ?', (username, pwd_hash))
     
     if user:
         token = str(uuid.uuid4())
-        user_id = user['id'] if isinstance(user, dict) else user[0]
-        # Guardar sesión en la base de datos en lugar de memoria
+        user_dict = dict(user) if not isinstance(user, dict) else user
+        user_id = user_dict.get('id') or user[0]
+        user_name = user_dict.get('username') or user[1]
+        user_role = user_dict.get('role') or user[2] or 'user'
+        
+        # Guardar sesión en la base de datos
         db.execute('INSERT OR REPLACE INTO sessions (token, user_id) VALUES (?, ?)', (token, user_id))
-        return jsonify({"token": token})
+        return jsonify({"token": token, "username": user_name, "role": user_role})
     else:
         return jsonify({"error": "Credenciales inválidas"}), 401
+
+# --- User Management Endpoints ---
+
+@app.route('/api/usuarios', methods=['GET'])
+def list_usuarios():
+    """Listar todos los usuarios (solo admin)"""
+    if not check_admin(): 
+        return jsonify({"error": "Unauthorized - Admin only"}), 403
+    
+    try:
+        db = get_db()
+        rows = db.execute('SELECT id, username, role FROM usuarios ORDER BY username')
+        users = []
+        for row in rows:
+            user = dict(row) if not isinstance(row, dict) else row
+            users.append({
+                "id": user.get('id'),
+                "username": user.get('username'),
+                "role": user.get('role') or 'user'
+            })
+        return jsonify(users)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/usuarios', methods=['POST'])
+def create_usuario():
+    """Crear nuevo usuario (solo admin)"""
+    if not check_admin(): 
+        return jsonify({"error": "Unauthorized - Admin only"}), 403
+    
+    try:
+        data = request.json
+        username = data.get('username')
+        password = data.get('password')
+        role = data.get('role', 'user')
+        
+        if not username or not password:
+            return jsonify({"error": "Username and password required"}), 400
+        
+        if role not in ['admin', 'user']:
+            return jsonify({"error": "Role must be 'admin' or 'user'"}), 400
+        
+        pwd_hash = hashlib.sha256(password.encode()).hexdigest()
+        db = get_db()
+        db.execute('INSERT INTO usuarios (username, password, role) VALUES (?, ?, ?)', 
+                   (username, pwd_hash, role))
+        
+        return jsonify({"status": "ok", "message": f"Usuario {username} creado exitosamente"})
+    except Exception as e:
+        error_msg = str(e)
+        if "UNIQUE constraint" in error_msg:
+            return jsonify({"error": "El usuario ya existe"}), 400
+        return jsonify({"error": error_msg}), 500
+
+@app.route('/api/usuarios', methods=['DELETE'])
+def delete_usuario():
+    """Eliminar usuario (solo admin)"""
+    if not check_admin(): 
+        return jsonify({"error": "Unauthorized - Admin only"}), 403
+    
+    try:
+        user_id = request.args.get('id')
+        if not user_id:
+            return jsonify({"error": "User ID required"}), 400
+        
+        db = get_db()
+        
+        # Prevenir eliminación del último admin
+        admin_count = db.fetch_one('SELECT count(*) as c FROM usuarios WHERE role = ?', ('admin',))
+        count = admin_count['c'] if isinstance(admin_count, dict) else admin_count[0]
+        
+        user_to_delete = db.fetch_one('SELECT role FROM usuarios WHERE id = ?', (user_id,))
+        if user_to_delete:
+            role = user_to_delete['role'] if isinstance(user_to_delete, dict) else user_to_delete[0]
+            if role == 'admin' and count <= 1:
+                return jsonify({"error": "No puedes eliminar el último administrador"}), 400
+        
+        # Eliminar usuario y sus sesiones
+        db.execute('DELETE FROM sessions WHERE user_id = ?', (user_id,))
+        db.execute('DELETE FROM usuarios WHERE id = ?', (user_id,))
+        
+        return jsonify({"status": "ok", "message": "Usuario eliminado"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/cambiar-password', methods=['POST'])
+def cambiar_password():
+    """Cambiar contraseña del usuario autenticado"""
+    if not check_auth(): 
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        user_id = get_current_user_id()
+        if not user_id:
+            return jsonify({"error": "Unauthorized"}), 401
+        
+        data = request.json
+        old_password = data.get('old_password')
+        new_password = data.get('new_password')
+        
+        if not old_password or not new_password:
+            return jsonify({"error": "Se requieren ambas contraseñas"}), 400
+        
+        # Verificar contraseña antigua
+        old_pwd_hash = hashlib.sha256(old_password.encode()).hexdigest()
+        db = get_db()
+        user = db.fetch_one('SELECT id FROM usuarios WHERE id = ? AND password = ?', (user_id, old_pwd_hash))
+        
+        if not user:
+            return jsonify({"error": "Contraseña antigua incorrecta"}), 400
+        
+        # Actualizar contraseña
+        new_pwd_hash = hashlib.sha256(new_password.encode()).hexdigest()
+        db.execute('UPDATE usuarios SET password = ? WHERE id = ?', (new_pwd_hash, user_id))
+        
+        return jsonify({"status": "ok", "message": "Contraseña cambiada exitosamente"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/distribuciones', methods=['GET', 'POST', 'DELETE'])
 def distribuciones():
@@ -393,19 +507,6 @@ def profesionales():
         print(f"Error in profesionales: {e}")
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/reset', methods=['POST'])
-def reset_db():
-    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
-    try:
-        db = get_db()
-        # Delete all data but keep admin user
-        db.execute('DELETE FROM establecimientos')
-        db.execute('DELETE FROM profesionales')
-        db.execute('DELETE FROM rondas_minimas')
-        db.execute('DELETE FROM distribuciones')
-        return jsonify({"status": "cleared"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/rondas', methods=['GET', 'POST', 'DELETE'])
 def rondas():
