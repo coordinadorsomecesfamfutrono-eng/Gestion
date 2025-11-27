@@ -269,7 +269,7 @@ var Management = {
       }
     } catch (e) {
       console.error(e);
-      alert('Error de conexión');
+      alert('Error: ' + e.message);
     }
   },
 };
