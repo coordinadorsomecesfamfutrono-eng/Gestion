@@ -150,6 +150,7 @@ def init_tables():
     try:
         db = get_db()
         db.execute('CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL)')
+        db.execute('CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, user_id INTEGER, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
         db.execute('CREATE TABLE IF NOT EXISTS distribuciones (id INTEGER PRIMARY KEY AUTOINCREMENT, mes INTEGER, anio INTEGER, data TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
         db.execute('CREATE TABLE IF NOT EXISTS establecimientos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT UNIQUE NOT NULL, boxes INTEGER DEFAULT 1, restriccion TEXT)')
         db.execute('CREATE TABLE IF NOT EXISTS profesionales (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, profesion TEXT NOT NULL, establecimientos TEXT, obs TEXT)')
@@ -163,9 +164,13 @@ def check_auth():
     auth_header = request.headers.get('Authorization')
     if not auth_header:
         return False
+    
     try:
-        token = auth_header.split(' ')[1]
-        return token in SESSIONS
+        token = auth_header.replace('Bearer ', '')
+        # Buscar token en la base de datos
+        db = get_db()
+        session = db.fetch_one('SELECT user_id FROM sessions WHERE token = ?', (token,))
+        return session is not None
     except:
         return False
 
@@ -277,7 +282,8 @@ def login():
     if user:
         token = str(uuid.uuid4())
         user_id = user['id'] if isinstance(user, dict) else user[0]
-        SESSIONS[token] = user_id
+        # Guardar sesión en la base de datos en lugar de memoria
+        db.execute('INSERT OR REPLACE INTO sessions (token, user_id) VALUES (?, ?)', (token, user_id))
         return jsonify({"token": token})
     else:
         return jsonify({"error": "Credenciales inválidas"}), 401
