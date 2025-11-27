@@ -3,6 +3,11 @@ var UI = {
     this.mostrarEstadisticas(distribucion);
     this.mostrarAdvertencias(distribucion.advertencias, distribucion.errores);
     this.renderTabla(distribucion);
+
+    // Habilitar botones de acción
+    document.getElementById('btnGuardar').disabled = false;
+    document.getElementById('btnExportarPDF').disabled = false;
+    document.getElementById('btnExportar').disabled = false;
   },
 
   mostrarEstadisticas(distribucion) {
@@ -107,6 +112,11 @@ var UI = {
   mostrarLoader() {
     document.getElementById('loader').style.display = 'block';
     document.getElementById('resultadosContainer').style.display = 'none';
+
+    // Deshabilitar botones
+    document.getElementById('btnGuardar').disabled = true;
+    document.getElementById('btnExportarPDF').disabled = true;
+    document.getElementById('btnExportar').disabled = true;
   },
 
   ocultarLoader() {
