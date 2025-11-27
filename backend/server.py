@@ -1,95 +1,147 @@
-import http.server
-import socketserver
+from flask import Flask, request, jsonify, send_from_directory, Response
 import json
 import sqlite3
 import os
-import mimetypes
 import uuid
 import hashlib
-from urllib.parse import urlparse, parse_qs
+import mimetypes
+
+# Intentar importar libsql_client para Turso
+try:
+    import libsql_client
+    TURSO_AVAILABLE = True
+except ImportError:
+    TURSO_AVAILABLE = False
+
+app = Flask(__name__, static_folder='../frontend')
 
 # Configuración
-PORT = int(os.environ.get('PORT', 8000))
 DB_FILE = os.environ.get('DB_FILE', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'distribuciones.db'))
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'frontend')
 
+# Configuración Turso
+TURSO_URL = os.environ.get('TURSO_DATABASE_URL')
+TURSO_TOKEN = os.environ.get('TURSO_AUTH_TOKEN')
+
 # Sesiones en memoria {token: user_id}
+# NOTA: En Vercel (serverless), esto se reinicia. Para producción real se debería usar una DB o Redis.
+# Para este caso de uso simple, aceptamos que el login se pierda al reiniciar la lambda.
 SESSIONS = {}
 
-# Inicializar Base de Datos
-def init_db():
-    try:
+# --- Database Abstraction ---
+
+def get_db():
+    """Retorna un objeto conexión unificado (Local o Turso)"""
+    if TURSO_AVAILABLE and TURSO_URL and TURSO_TOKEN:
+        return TursoDB()
+    return LocalDB()
+
+class LocalDB:
+    def execute(self, query, params=()):
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        try:
+            c.execute(query, params)
+            if query.strip().upper().startswith('SELECT'):
+                return c.fetchall()
+            conn.commit()
+            return c.lastrowid
+        finally:
+            conn.close()
+
+    def execute_many(self, query, params_list):
         conn = sqlite3.connect(DB_FILE)
         c = conn.cursor()
-        
-        # Tabla Usuarios
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS usuarios (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password TEXT NOT NULL -- Hash SHA256
-            )
-        ''')
+        try:
+            c.executemany(query, params_list)
+            conn.commit()
+        finally:
+            conn.close()
 
-        # Tabla Distribuciones (Historial)
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS distribuciones (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                mes INTEGER,
-                anio INTEGER,
-                data TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
+    def fetch_one(self, query, params=()):
+        conn = sqlite3.connect(DB_FILE)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        try:
+            c.execute(query, params)
+            return c.fetchone()
+        finally:
+            conn.close()
 
-        # Tabla Establecimientos
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS establecimientos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre TEXT UNIQUE NOT NULL,
-                boxes INTEGER DEFAULT 1,
-                restriccion TEXT
-            )
-        ''')
+class TursoDB:
+    def __init__(self):
+        self.client = libsql_client.create_client_sync(url=TURSO_URL, auth_token=TURSO_TOKEN)
 
-        # Tabla Profesionales
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS profesionales (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nombre TEXT NOT NULL,
-                profesion TEXT NOT NULL,
-                establecimientos TEXT, -- JSON array de nombres
-                obs TEXT
-            )
-        ''')
+    def execute(self, query, params=()):
+        try:
+            # Turso usa ? igual que sqlite
+            rs = self.client.execute(query, params)
+            if query.strip().upper().startswith('SELECT'):
+                # Convertir filas a diccionarios para compatibilidad
+                cols = [c.name for c in rs.columns]
+                results = []
+                for row in rs.rows:
+                    item = {}
+                    for i, val in enumerate(row):
+                        item[cols[i]] = val
+                    results.append(item)
+                return results
+            return rs.last_insert_rowid
+        finally:
+            self.client.close()
 
-        # Tabla Rondas Mínimas
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS rondas_minimas (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                profesion TEXT NOT NULL,
-                establecimiento TEXT NOT NULL,
-                cantidad INTEGER DEFAULT 0
-            )
-        ''')
+    def execute_many(self, query, params_list):
+        # Turso client sync no tiene executemany nativo simple, iteramos
+        try:
+            batch = self.client.batch()
+            for params in params_list:
+                batch.execute(query, params)
+            batch.commit()
+        finally:
+            self.client.close()
 
-        # Seed Admin User
-        c.execute('SELECT count(*) FROM usuarios')
-        if c.fetchone()[0] == 0:
+    def fetch_one(self, query, params=()):
+        try:
+            rs = self.client.execute(query, params)
+            if not rs.rows:
+                return None
+            
+            # Convertir a dict
+            cols = [c.name for c in rs.columns]
+            row = rs.rows[0]
+            item = {}
+            for i, val in enumerate(row):
+                item[cols[i]] = val
+            return item
+        finally:
+            self.client.close()
+
+# --- Init DB ---
+def init_db():
+    db = get_db()
+    print(f"Inicializando DB usando: {'TURSO' if isinstance(db, TursoDB) else 'LOCAL SQLITE'}")
+    
+    try:
+        # Tablas
+        db.execute('CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL)')
+        db.execute('CREATE TABLE IF NOT EXISTS distribuciones (id INTEGER PRIMARY KEY AUTOINCREMENT, mes INTEGER, anio INTEGER, data TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+        db.execute('CREATE TABLE IF NOT EXISTS establecimientos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT UNIQUE NOT NULL, boxes INTEGER DEFAULT 1, restriccion TEXT)')
+        db.execute('CREATE TABLE IF NOT EXISTS profesionales (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, profesion TEXT NOT NULL, establecimientos TEXT, obs TEXT)')
+        db.execute('CREATE TABLE IF NOT EXISTS rondas_minimas (id INTEGER PRIMARY KEY AUTOINCREMENT, profesion TEXT NOT NULL, establecimiento TEXT NOT NULL, cantidad INTEGER DEFAULT 0)')
+
+        # Seed Admin
+        res = db.fetch_one('SELECT count(*) as c FROM usuarios')
+        count = res['c'] if isinstance(res, dict) else res[0]
+        if count == 0:
             print("Seeding admin user...")
-            # Password: 'admin' (SHA256)
-            # echo -n "admin" | shasum -a 256
-            # 8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
-            # Usaremos 'cesfam2025' como acordado en el plan
-            # echo -n "cesfam2025" | shasum -a 256
-            # 05152a303634374352735647596c5a303541
-            # Wait, let's just use python hashlib here to be sure
             pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
-            c.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
+            db.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
 
-        # Seed Data (Datos Iniciales) si las tablas están vacías
-        c.execute('SELECT count(*) FROM establecimientos')
-        if c.fetchone()[0] == 0:
+        # Seed Establecimientos
+        res = db.fetch_one('SELECT count(*) as c FROM establecimientos')
+        count = res['c'] if isinstance(res, dict) else res[0]
+        if count == 0:
             print("Seeding establecimientos...")
             establecimientos = [
                 ('NONTUELA', 6, None), ('LLIFEN', 4, None), ('MAIHUE', 4, None),
@@ -98,10 +150,12 @@ def init_db():
                 ('ISLA HUAPI', 3, 'MARTES_Y_JUEVES_1_3'), ('CECOSF', 5, None),
                 ('LONCOPAN', 5, None), ('LAS QUEMAS', 2, None), ('CAUNAHUE', 2, None)
             ]
-            c.executemany('INSERT INTO establecimientos (nombre, boxes, restriccion) VALUES (?, ?, ?)', establecimientos)
+            db.execute_many('INSERT INTO establecimientos (nombre, boxes, restriccion) VALUES (?, ?, ?)', establecimientos)
 
-        c.execute('SELECT count(*) FROM profesionales')
-        if c.fetchone()[0] == 0:
+        # Seed Profesionales
+        res = db.fetch_one('SELECT count(*) as c FROM profesionales')
+        count = res['c'] if isinstance(res, dict) else res[0]
+        if count == 0:
             print("Seeding profesionales...")
             profesionales = [
                 ('ROBERTO', 'MEDICO', '["CECOSF", "LONCOPAN"]', None),
@@ -120,10 +174,12 @@ def init_db():
                 ('NUTRI NONTUELA', 'NUTRICIONISTA', '["NONTUELA"]', None),
                 ('PSICO NONTUELA', 'PSICOLOGO', '["NONTUELA"]', None)
             ]
-            c.executemany('INSERT INTO profesionales (nombre, profesion, establecimientos, obs) VALUES (?, ?, ?, ?)', profesionales)
+            db.execute_many('INSERT INTO profesionales (nombre, profesion, establecimientos, obs) VALUES (?, ?, ?, ?)', profesionales)
 
-        c.execute('SELECT count(*) FROM rondas_minimas')
-        if c.fetchone()[0] == 0:
+        # Seed Rondas
+        res = db.fetch_one('SELECT count(*) as c FROM rondas_minimas')
+        count = res['c'] if isinstance(res, dict) else res[0]
+        if count == 0:
             print("Seeding rondas minimas...")
             rondas = [
                 ('MEDICO', 'CECOSF', 15), ('MEDICO', 'LONCOPAN', 15), ('MEDICO', 'ISLA HUAPI', 4),
@@ -137,272 +193,180 @@ def init_db():
                 ('ENFERMERO', 'NONTUELA', 20), ('NUTRICIONISTA', 'NONTUELA', 10),
                 ('PSICOLOGO', 'NONTUELA', 10), ('ASISTENTE_SOCIAL', 'NONTUELA', 10)
             ]
-            c.executemany('INSERT INTO rondas_minimas (profesion, establecimiento, cantidad) VALUES (?, ?, ?)', rondas)
+            db.execute_many('INSERT INTO rondas_minimas (profesion, establecimiento, cantidad) VALUES (?, ?, ?)', rondas)
 
-        conn.commit()
-        conn.close()
-        print(f"Base de datos {DB_FILE} inicializada y poblada correctamente.")
     except Exception as e:
         print(f"Error inicializando base de datos: {e}")
 
-class Handler(http.server.SimpleHTTPRequestHandler):
-    def check_auth(self):
-        auth_header = self.headers.get('Authorization')
-        if not auth_header:
-            return False
+# Ejecutar init_db al inicio (en Vercel esto corre al arrancar la instancia)
+init_db()
+
+# --- Auth Helper ---
+def check_auth():
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return False
+    try:
+        token = auth_header.split(' ')[1]
+        return token in SESSIONS
+    except:
+        return False
+
+# --- Routes ---
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    pwd_hash = hashlib.sha256(password.encode()).hexdigest()
+    
+    db = get_db()
+    user = db.fetch_one('SELECT id FROM usuarios WHERE username = ? AND password = ?', (username, pwd_hash))
+    
+    if user:
+        token = str(uuid.uuid4())
+        user_id = user['id'] if isinstance(user, dict) else user[0]
+        SESSIONS[token] = user_id
+        return jsonify({"token": token})
+    else:
+        return jsonify({"error": "Credenciales inválidas"}), 401
+
+@app.route('/api/distribuciones', methods=['GET', 'POST', 'DELETE'])
+def distribuciones():
+    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
+    db = get_db()
+
+    if request.method == 'GET':
+        rows = db.execute('SELECT * FROM distribuciones ORDER BY anio DESC, mes DESC')
+        results = []
+        for row in rows:
+            item = dict(row) if not isinstance(row, dict) else row
+            if 'data' in item:
+                json_data = json.loads(item['data'])
+                json_data['db_id'] = item['id']
+                results.append(json_data)
+        return jsonify(results)
+
+    if request.method == 'POST':
+        data = request.json
+        mes = data.get('mes')
+        anio = data.get('anio')
+        existing = db.fetch_one('SELECT id FROM distribuciones WHERE mes = ? AND anio = ?', (mes, anio))
         
-        try:
-            # Bearer <token>
-            token = auth_header.split(' ')[1]
-            return token in SESSIONS
-        except:
-            return False
-
-    def do_GET(self):
-        # API: Obtener historial
-        if self.path.startswith('/api/distribuciones'):
-            if not self.check_auth():
-                self.send_error(401, "Unauthorized")
-                return
-            self.handle_get_query('SELECT * FROM distribuciones ORDER BY anio DESC, mes DESC')
-            return
-
-        # API: Obtener Establecimientos
-        if self.path.startswith('/api/establecimientos'):
-            if not self.check_auth():
-                self.send_error(401, "Unauthorized")
-                return
-            self.handle_get_query('SELECT * FROM establecimientos ORDER BY nombre')
-            return
-
-        # API: Obtener Profesionales
-        if self.path.startswith('/api/profesionales'):
-            if not self.check_auth():
-                self.send_error(401, "Unauthorized")
-                return
-            self.handle_get_query('SELECT * FROM profesionales ORDER BY nombre')
-            return
-
-        # API: Obtener Rondas Mínimas
-        if self.path.startswith('/api/rondas'):
-            if not self.check_auth():
-                self.send_error(401, "Unauthorized")
-                return
-            self.handle_get_query('SELECT * FROM rondas_minimas')
-            return
-
-        # Servir archivos estáticos
-        # Parsear URL para quitar query params (?v=2, etc)
-        parsed_path = urlparse(self.path)
-        clean_path = parsed_path.path
-
-        if clean_path == '/':
-            clean_path = '/index.html'
-            
-        file_path = os.path.join(FRONTEND_DIR, clean_path.lstrip('/'))
-        
-        if os.path.exists(file_path) and os.path.isfile(file_path):
-            self.send_response(200)
-            mimetype, _ = mimetypes.guess_type(file_path)
-            if mimetype:
-                self.send_header('Content-type', mimetype)
-            self.end_headers()
-            with open(file_path, 'rb') as f:
-                self.wfile.write(f.read())
+        if existing:
+            id_val = existing['id'] if isinstance(existing, dict) else existing[0]
+            db.execute('UPDATE distribuciones SET data = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?', (json.dumps(data), id_val))
         else:
-            self.send_error(404, "Archivo no encontrado")
+            db.execute('INSERT INTO distribuciones (mes, anio, data) VALUES (?, ?, ?)', (mes, anio, json.dumps(data)))
+        return jsonify({"status": "ok"})
 
-    def handle_get_query(self, query):
-        try:
-            conn = sqlite3.connect(DB_FILE)
-            conn.row_factory = sqlite3.Row
-            c = conn.cursor()
-            c.execute(query)
-            rows = c.fetchall()
-            
-            results = []
-            for row in rows:
-                item = dict(row)
-                
-                # Caso especial: Distribuciones (todo en 'data')
-                if 'data' in item:
-                    json_data = json.loads(item['data'])
-                    json_data['db_id'] = row['id']
-                    results.append(json_data)
-                    continue
+    if request.method == 'DELETE':
+        mes = request.args.get('mes')
+        anio = request.args.get('anio')
+        db.execute('DELETE FROM distribuciones WHERE mes = ? AND anio = ?', (mes, anio))
+        return jsonify({"status": "ok"})
 
-                # Caso normal: Tablas estructuradas
-                # Usar el ID del dict ya convertido
-                if 'id' in item:
-                    item['db_id'] = item['id']
-                
-                # Parsear JSON fields si existen (ej: establecimientos en profesionales)
-                if 'establecimientos' in item and isinstance(item['establecimientos'], str):
-                    try:
-                        item['establecimientos'] = json.loads(item['establecimientos'])
-                    except:
-                        pass 
-                
-                results.append(item)
-            
-            conn.close()
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps(results).encode())
-        except Exception as e:
-            self.send_error(500, str(e))
+@app.route('/api/establecimientos', methods=['GET', 'POST', 'DELETE'])
+def establecimientos():
+    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
+    db = get_db()
 
-    def do_POST(self):
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        data = json.loads(post_data.decode('utf-8'))
+    if request.method == 'GET':
+        rows = db.execute('SELECT * FROM establecimientos ORDER BY nombre')
+        results = []
+        for row in rows:
+            item = dict(row) if not isinstance(row, dict) else row
+            if 'id' in item: item['db_id'] = item['id']
+            results.append(item)
+        return jsonify(results)
 
-        # API: Login (Pública)
-        if self.path == '/api/login':
-            username = data.get('username')
-            password = data.get('password')
-            
-            # Hash password
-            pwd_hash = hashlib.sha256(password.encode()).hexdigest()
-            
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
-            c.execute('SELECT id FROM usuarios WHERE username = ? AND password = ?', (username, pwd_hash))
-            user = c.fetchone()
-            conn.close()
-            
-            if user:
-                token = str(uuid.uuid4())
-                SESSIONS[token] = user[0]
-                
-                self.send_response(200)
-                self.send_header('Content-type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({"token": token}).encode())
-            else:
-                self.send_error(401, "Credenciales inválidas")
-            return
+    if request.method == 'POST':
+        data = request.json
+        if 'id' in data:
+            db.execute('UPDATE establecimientos SET nombre=?, boxes=?, restriccion=? WHERE id=?', 
+                      (data['nombre'], data['boxes'], data['restriccion'], data['id']))
+        else:
+            db.execute('INSERT INTO establecimientos (nombre, boxes, restriccion) VALUES (?, ?, ?)', 
+                      (data['nombre'], data['boxes'], data['restriccion']))
+        return jsonify({"status": "ok"})
 
-        # Proteger resto de rutas POST
-        if not self.check_auth():
-            self.send_error(401, "Unauthorized")
-            return
+    if request.method == 'DELETE':
+        id = request.args.get('id')
+        db.execute('DELETE FROM establecimientos WHERE id = ?', (id,))
+        return jsonify({"status": "ok"})
 
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
+@app.route('/api/profesionales', methods=['GET', 'POST', 'DELETE'])
+def profesionales():
+    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
+    db = get_db()
 
-        try:
-            # API: Guardar distribución
-            if self.path == '/api/distribuciones':
-                # Fail-safe table creation
-                c.execute('CREATE TABLE IF NOT EXISTS distribuciones (id INTEGER PRIMARY KEY AUTOINCREMENT, mes INTEGER, anio INTEGER, data TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
-                
-                mes = data.get('mes')
-                anio = data.get('anio')
-                c.execute('SELECT id FROM distribuciones WHERE mes = ? AND anio = ?', (mes, anio))
-                existing = c.fetchone()
-                
-                if existing:
-                    c.execute('UPDATE distribuciones SET data = ?, created_at = CURRENT_TIMESTAMP WHERE id = ?', (json.dumps(data), existing[0]))
-                else:
-                    c.execute('INSERT INTO distribuciones (mes, anio, data) VALUES (?, ?, ?)', (mes, anio, json.dumps(data)))
+    if request.method == 'GET':
+        rows = db.execute('SELECT * FROM profesionales ORDER BY nombre')
+        results = []
+        for row in rows:
+            item = dict(row) if not isinstance(row, dict) else row
+            if 'id' in item: item['db_id'] = item['id']
+            if 'establecimientos' in item and isinstance(item['establecimientos'], str):
+                try: item['establecimientos'] = json.loads(item['establecimientos'])
+                except: pass
+            results.append(item)
+        return jsonify(results)
 
-            # API: Guardar Establecimiento (Nuevo/Editar)
-            elif self.path == '/api/establecimientos':
-                if 'id' in data: # Update
-                    c.execute('UPDATE establecimientos SET nombre=?, boxes=?, restriccion=? WHERE id=?', 
-                              (data['nombre'], data['boxes'], data['restriccion'], data['id']))
-                else: # Insert
-                    c.execute('INSERT INTO establecimientos (nombre, boxes, restriccion) VALUES (?, ?, ?)', 
-                              (data['nombre'], data['boxes'], data['restriccion']))
+    if request.method == 'POST':
+        data = request.json
+        estabs_json = json.dumps(data['establecimientos'])
+        if 'id' in data:
+            db.execute('UPDATE profesionales SET nombre=?, profesion=?, establecimientos=?, obs=? WHERE id=?', 
+                      (data['nombre'], data['profesion'], estabs_json, data['obs'], data['id']))
+        else:
+            db.execute('INSERT INTO profesionales (nombre, profesion, establecimientos, obs) VALUES (?, ?, ?, ?)', 
+                      (data['nombre'], data['profesion'], estabs_json, data['obs']))
+        return jsonify({"status": "ok"})
 
-            # API: Guardar Profesional
-            elif self.path == '/api/profesionales':
-                estabs_json = json.dumps(data['establecimientos'])
-                if 'id' in data:
-                    c.execute('UPDATE profesionales SET nombre=?, profesion=?, establecimientos=?, obs=? WHERE id=?', 
-                              (data['nombre'], data['profesion'], estabs_json, data['obs'], data['id']))
-                else:
-                    c.execute('INSERT INTO profesionales (nombre, profesion, establecimientos, obs) VALUES (?, ?, ?, ?)', 
-                              (data['nombre'], data['profesion'], estabs_json, data['obs']))
+    if request.method == 'DELETE':
+        id = request.args.get('id')
+        db.execute('DELETE FROM profesionales WHERE id = ?', (id,))
+        return jsonify({"status": "ok"})
 
-            # API: Guardar Ronda Mínima
-            elif self.path == '/api/rondas':
-                if 'id' in data:
-                    c.execute('UPDATE rondas_minimas SET profesion=?, establecimiento=?, cantidad=? WHERE id=?', 
-                              (data['profesion'], data['establecimiento'], data['cantidad'], data['id']))
-                else:
-                    c.execute('INSERT INTO rondas_minimas (profesion, establecimiento, cantidad) VALUES (?, ?, ?)', 
-                              (data['profesion'], data['establecimiento'], data['cantidad']))
+@app.route('/api/rondas', methods=['GET', 'POST', 'DELETE'])
+def rondas():
+    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
+    db = get_db()
 
-            conn.commit()
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "ok"}).encode())
+    if request.method == 'GET':
+        rows = db.execute('SELECT * FROM rondas_minimas')
+        results = []
+        for row in rows:
+            item = dict(row) if not isinstance(row, dict) else row
+            if 'id' in item: item['db_id'] = item['id']
+            results.append(item)
+        return jsonify(results)
 
-        except Exception as e:
-            self.send_error(500, str(e))
-        finally:
-            conn.close()
+    if request.method == 'POST':
+        data = request.json
+        if 'id' in data:
+            db.execute('UPDATE rondas_minimas SET profesion=?, establecimiento=?, cantidad=? WHERE id=?', 
+                      (data['profesion'], data['establecimiento'], data['cantidad'], data['id']))
+        else:
+            db.execute('INSERT INTO rondas_minimas (profesion, establecimiento, cantidad) VALUES (?, ?, ?)', 
+                      (data['profesion'], data['establecimiento'], data['cantidad']))
+        return jsonify({"status": "ok"})
 
-    def do_DELETE(self):
-        if not self.check_auth():
-            self.send_error(401, "Unauthorized")
-            return
+    if request.method == 'DELETE':
+        id = request.args.get('id')
+        db.execute('DELETE FROM rondas_minimas WHERE id = ?', (id,))
+        return jsonify({"status": "ok"})
 
-        try:
-            parsed = urlparse(self.path)
-            params = parse_qs(parsed.query)
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
+# --- Static Files (Fallback para desarrollo local) ---
+@app.route('/', defaults={'path': 'index.html'})
+@app.route('/<path:path>')
+def serve_static(path):
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
 
-            if self.path.startswith('/api/distribuciones'):
-                mes = int(params['mes'][0])
-                anio = int(params['anio'][0])
-                c.execute('DELETE FROM distribuciones WHERE mes = ? AND anio = ?', (mes, anio))
-
-            elif self.path.startswith('/api/establecimientos'):
-                id = int(params['id'][0])
-                c.execute('DELETE FROM establecimientos WHERE id = ?', (id,))
-
-            elif self.path.startswith('/api/profesionales'):
-                id = int(params['id'][0])
-                c.execute('DELETE FROM profesionales WHERE id = ?', (id,))
-
-            elif self.path.startswith('/api/rondas'):
-                id = int(params['id'][0])
-                c.execute('DELETE FROM rondas_minimas WHERE id = ?', (id,))
-
-            conn.commit()
-            conn.close()
-            
-            self.send_response(200)
-            self.send_header('Content-type', 'application/json')
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "ok"}).encode())
-        except ValueError as ve:
-            print(f"Error de valor en DELETE: {ve}")
-            self.send_error(400, f"ID inválido: {ve}")
-        except Exception as e:
-            print(f"Error en DELETE: {e}")
-            self.send_error(500, str(e))
-
-# Iniciar
 if __name__ == '__main__':
-    init_db()
-    os.chdir(os.path.dirname(os.path.abspath(__file__))) # Cambiar al directorio del script
-    
-    # Permitir reutilizar puerto
-    socketserver.TCPServer.allow_reuse_address = True
-    
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        print(f"Servidor Python corriendo en http://localhost:{PORT}")
-        print(f"Sirviendo archivos desde: {FRONTEND_DIR}")
-        print(f"Base de datos: {os.path.abspath(DB_FILE)}")
-        try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:
-            print("\nDeteniendo servidor...")
-            httpd.server_close()
+    port = int(os.environ.get('PORT', 8000))
+    app.run(host='0.0.0.0', port=port)

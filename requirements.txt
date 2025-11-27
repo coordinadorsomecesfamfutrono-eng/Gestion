@@ -1,2 +1,3 @@
-# No external dependencies required
-# Using Python Standard Library (http.server, sqlite3, json, etc.)
+libsql-client
+Flask
+
