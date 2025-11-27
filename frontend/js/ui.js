@@ -1,7 +1,7 @@
 var UI = {
   mostrarResultados(distribucion) {
     this.mostrarEstadisticas(distribucion);
-    this.mostrarAdvertencias(distribucion.advertencias);
+    this.mostrarAdvertencias(distribucion.advertencias, distribucion.errores);
     this.renderTabla(distribucion);
   },
 
@@ -17,29 +17,49 @@ var UI = {
     document.getElementById('statAdvertencias').textContent = distribucion.advertencias.length;
   },
 
-  mostrarAdvertencias(advertencias) {
+  mostrarAdvertencias(advertencias, errores = []) {
     const container = document.getElementById('advertenciasContainer');
 
-    if (advertencias.length === 0) {
+    if (advertencias.length === 0 && errores.length === 0) {
       container.style.display = 'none';
       return;
     }
 
     container.style.display = 'block';
-    container.innerHTML = `
-      <div class="alert">
-        <div class="alert-title">⚠️ Advertencias (${advertencias.length})</div>
-        <ul class="alert-list">
-          ${advertencias.map(a => `
-            <li>
-              <strong>${a.profesional}</strong> en <strong>${a.establecimiento}</strong>: 
-              Requiere ${a.requeridas} rondas pero solo se asignaron ${a.asignadas}
-              (días disponibles limitados)
-            </li>
-          `).join('')}
-        </ul>
-      </div>
-    `;
+
+    let html = '';
+
+    // Mostrar Errores de Datos (Rojo)
+    if (errores && errores.length > 0) {
+      html += `
+        <div class="alert alert-error" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; margin-bottom: 10px;">
+          <div class="alert-title">❌ Errores de Datos (${errores.length})</div>
+          <ul class="alert-list">
+            ${errores.map(e => `<li>${e.mensaje}</li>`).join('')}
+          </ul>
+        </div>
+        `;
+    }
+
+    // Mostrar Advertencias de Distribución (Amarillo)
+    if (advertencias && advertencias.length > 0) {
+      html += `
+        <div class="alert">
+            <div class="alert-title">⚠️ Advertencias de Distribución (${advertencias.length})</div>
+            <ul class="alert-list">
+            ${advertencias.map(a => `
+                <li>
+                <strong>${a.profesional}</strong> en <strong>${a.establecimiento}</strong>: 
+                Requiere ${a.requeridas} rondas pero solo se asignaron ${a.asignadas}
+                (días disponibles limitados)
+                </li>
+            `).join('')}
+            </ul>
+        </div>
+        `;
+    }
+
+    container.innerHTML = html;
   },
 
   renderTabla(distribucion) {

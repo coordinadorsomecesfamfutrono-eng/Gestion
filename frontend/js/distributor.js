@@ -4,8 +4,7 @@ var Distributor = {
     generarDistribucion(mes, anio) {
         const calendario = this.generarCalendario(mes, anio);
         const asignaciones = [];
-        const advertencias = [];
-        const ocupacion = {}; // {fecha: {profesional: establecimiento}}
+        const errores = []; // Para errores de datos (ej. establecimiento no encontrado)
 
         // Para cada profesional
         for (const prof of DataStore.profesionales) {
@@ -16,6 +15,10 @@ var Distributor = {
                 // Skip if establishment doesn't exist
                 if (!estab) {
                     console.warn(`Establecimiento "${estabNombre}" no encontrado para ${prof.nombre}`);
+                    errores.push({
+                        tipo: 'error',
+                        mensaje: `Establecimiento "${estabNombre}" asignado a ${prof.nombre} no existe en la base de datos.`
+                    });
                     continue;
                 }
 
@@ -63,7 +66,7 @@ var Distributor = {
             }
         }
 
-        return { mes, anio, asignaciones, advertencias };
+        return { mes, anio, asignaciones, advertencias, errores };
     },
 
     generarCalendario(mes, anio) {
