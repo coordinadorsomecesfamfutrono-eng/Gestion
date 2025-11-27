@@ -244,22 +244,78 @@ def seed():
         db = get_db()
         log.append(f"DB Type: {'TURSO' if isinstance(db, TursoDB) else 'LOCAL'}")
         
-        # Check Users
+        # 1. Usuarios
         res = db.fetch_one('SELECT count(*) as c FROM usuarios')
         count = res['c'] if isinstance(res, dict) else res[0]
-        log.append(f"Usuarios count before: {count}")
-        
         if count == 0:
             pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
             db.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
             log.append("Admin user inserted")
         else:
-            log.append("Admin user already exists")
-            
-        # Verify
-        res = db.fetch_one('SELECT count(*) as c FROM usuarios')
-        count_after = res['c'] if isinstance(res, dict) else res[0]
-        log.append(f"Usuarios count after: {count_after}")
+            log.append(f"Usuarios exists ({count})")
+
+        # 2. Establecimientos
+        res = db.fetch_one('SELECT count(*) as c FROM establecimientos')
+        count = res['c'] if isinstance(res, dict) else res[0]
+        if count == 0:
+            establecimientos = [
+                ('NONTUELA', 6, None), ('LLIFEN', 4, None), ('MAIHUE', 4, None),
+                ('CURRIÑE', 4, None), ('CHABRANCO', 4, 'LUNES_A_JUEVES'),
+                ('HUEINAHUE', 3, 'SOLO_MIERCOLES'), ('ARQUILHUE', 3, None),
+                ('ISLA HUAPI', 3, 'MARTES_Y_JUEVES_1_3'), ('CECOSF', 5, None),
+                ('LONCOPAN', 5, None), ('LAS QUEMAS', 2, None), ('CAUNAHUE', 2, None)
+            ]
+            db.execute_many('INSERT INTO establecimientos (nombre, boxes, restriccion) VALUES (?, ?, ?)', establecimientos)
+            log.append("Establecimientos seeded")
+        else:
+            log.append(f"Establecimientos exists ({count})")
+
+        # 3. Profesionales
+        res = db.fetch_one('SELECT count(*) as c FROM profesionales')
+        count = res['c'] if isinstance(res, dict) else res[0]
+        if count == 0:
+            profesionales = [
+                ('ROBERTO', 'MEDICO', '["CECOSF", "LONCOPAN"]', None),
+                ('FABIAN', 'MEDICO', '["ISLA HUAPI"]', None),
+                ('EMILIO', 'MEDICO', '["LLIFEN", "ARQUILHUE", "CAUNAHUE"]', None),
+                ('CANELO', 'MEDICO', '["CURRIÑE", "MAIHUE", "CHABRANCO", "HUEINAHUE"]', None),
+                ('DRA. CARO', 'MEDICO', '["NONTUELA", "LAS QUEMAS"]', None),
+                ('DR. SEBA', 'MEDICO', '["NONTUELA"]', None),
+                ('STEPHANIE', 'MATRON', '["CECOSF", "LONCOPAN", "ISLA HUAPI"]', None),
+                ('MATRONA NONTUELA', 'MATRON', '["NONTUELA"]', None),
+                ('VALERIA', 'ODONTOLOGO', '["LLIFEN"]', 'SOLO ASISTE LUNES MARTES Y MIERCOLES'),
+                ('JUAN PABLO', 'ODONTOLOGO', '["LLIFEN", "CURRIÑE", "MAIHUE", "HUEINAHUE"]', 'SOLO ASISTE JUEVES Y VIERNES'),
+                ('ODONT. NONTUELA', 'ODONTOLOGO', '["NONTUELA"]', None),
+                ('ENF. NONTUELA', 'ENFERMERO', '["NONTUELA"]', None),
+                ('A. SOCIAL NONTUELA', 'ASISTENTE_SOCIAL', '["NONTUELA"]', None),
+                ('NUTRI NONTUELA', 'NUTRICIONISTA', '["NONTUELA"]', None),
+                ('PSICO NONTUELA', 'PSICOLOGO', '["NONTUELA"]', None)
+            ]
+            db.execute_many('INSERT INTO profesionales (nombre, profesion, establecimientos, obs) VALUES (?, ?, ?, ?)', profesionales)
+            log.append("Profesionales seeded")
+        else:
+            log.append(f"Profesionales exists ({count})")
+
+        # 4. Rondas
+        res = db.fetch_one('SELECT count(*) as c FROM rondas_minimas')
+        count = res['c'] if isinstance(res, dict) else res[0]
+        if count == 0:
+            rondas = [
+                ('MEDICO', 'CECOSF', 15), ('MEDICO', 'LONCOPAN', 15), ('MEDICO', 'ISLA HUAPI', 4),
+                ('MEDICO', 'HUEINAHUE', 4), ('MEDICO', 'LLIFEN', 10), ('MEDICO', 'CURRIÑE', 8),
+                ('MEDICO', 'MAIHUE', 8), ('MEDICO', 'NONTUELA', 20), ('MEDICO', 'LAS QUEMAS', 4),
+                ('MEDICO', 'ARQUILHUE', 4), ('MEDICO', 'CAUNAHUE', 4),
+                ('MATRON', 'CECOSF', 10), ('MATRON', 'LONCOPAN', 10), ('MATRON', 'ISLA HUAPI', 4),
+                ('MATRON', 'NONTUELA', 15),
+                ('ODONTOLOGO', 'LLIFEN', 12), ('ODONTOLOGO', 'CURRIÑE', 6),
+                ('ODONTOLOGO', 'MAIHUE', 6), ('ODONTOLOGO', 'NONTUELA', 15),
+                ('ENFERMERO', 'NONTUELA', 20), ('NUTRICIONISTA', 'NONTUELA', 10),
+                ('PSICOLOGO', 'NONTUELA', 10), ('ASISTENTE_SOCIAL', 'NONTUELA', 10)
+            ]
+            db.execute_many('INSERT INTO rondas_minimas (profesion, establecimiento, cantidad) VALUES (?, ?, ?)', rondas)
+            log.append("Rondas seeded")
+        else:
+            log.append(f"Rondas exists ({count})")
         
         return jsonify({"status": "completed", "log": log})
     except Exception as e:
