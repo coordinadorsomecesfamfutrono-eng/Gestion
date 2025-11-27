@@ -21,6 +21,8 @@ FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 
 # Configuración Turso
 TURSO_URL = os.environ.get('TURSO_DATABASE_URL')
+if TURSO_URL and TURSO_URL.startswith('libsql://'):
+    TURSO_URL = TURSO_URL.replace('libsql://', 'https://')
 TURSO_TOKEN = os.environ.get('TURSO_AUTH_TOKEN')
 
 # Sesiones en memoria {token: user_id}
