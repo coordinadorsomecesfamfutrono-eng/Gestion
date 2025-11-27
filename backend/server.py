@@ -269,7 +269,6 @@ def seed():
             log.append(f"Usuarios exists ({count})")
 
         # 2. Establecimientos
-        # Siempre intentamos insertar (INSERT OR IGNORE) para asegurar que estén todos
         establecimientos = [
             ('NONTUELA', 6, None), ('LLIFEN', 4, None), ('MAIHUE', 4, None),
             ('CURRIÑE', 4, None), ('CHABRANCO', 4, 'LUNES_A_JUEVES'),
@@ -277,11 +276,19 @@ def seed():
             ('ISLA HUAPI', 3, 'MARTES_Y_JUEVES_1_3'), ('CECOSF', 5, None),
             ('LONCOPAN', 5, None), ('LAS QUEMAS', 2, None), ('CAUNAHUE', 2, None)
         ]
-        db.execute_many('INSERT OR IGNORE INTO establecimientos (nombre, boxes, restriccion) VALUES (?, ?, ?)', establecimientos)
+        
+        log.append("Starting verbose establishment seed...")
+        for est in establecimientos:
+            try:
+                # Usamos INSERT OR IGNORE para que no falle si ya existe
+                db.execute('INSERT OR IGNORE INTO establecimientos (nombre, boxes, restriccion) VALUES (?, ?, ?)', est)
+                log.append(f"Processed {est[0]}")
+            except Exception as e:
+                log.append(f"Error processing {est[0]}: {str(e)}")
         
         res = db.fetch_one('SELECT count(*) as c FROM establecimientos')
         count = res['c'] if isinstance(res, dict) else res[0]
-        log.append(f"Establecimientos synced (Total: {count})")
+        log.append(f"Establecimientos count final: {count}")
 
         # 3. Profesionales
         res = db.fetch_one('SELECT count(*) as c FROM profesionales')
@@ -413,43 +420,89 @@ def establecimientos():
                       (data['nombre'], data['boxes'], data['restriccion']))
         return jsonify({"status": "ok"})
 
-    if request.method == 'DELETE':
-        id = request.args.get('id')
-        db.execute('DELETE FROM establecimientos WHERE id = ?', (id,))
-        return jsonify({"status": "ok"})
+@app.route('/api/establecimientos', methods=['GET', 'POST', 'DELETE'])
+def establecimientos():
+    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
+    try:
+        db = get_db()
+
+        if request.method == 'GET':
+            rows = db.execute('SELECT * FROM establecimientos ORDER BY nombre')
+            results = []
+            for row in rows:
+                item = dict(row) if not isinstance(row, dict) else row
+                if 'id' in item: item['db_id'] = item['id']
+                results.append(item)
+            return jsonify(results)
+
+        if request.method == 'POST':
+            data = request.json
+            if 'id' in data:
+                db.execute('UPDATE establecimientos SET nombre=?, boxes=?, restriccion=? WHERE id=?', 
+                          (data['nombre'], data['boxes'], data['restriccion'], data['id']))
+            else:
+                db.execute('INSERT INTO establecimientos (nombre, boxes, restriccion) VALUES (?, ?, ?)', 
+                          (data['nombre'], data['boxes'], data['restriccion']))
+            return jsonify({"status": "ok"})
+
+        if request.method == 'DELETE':
+            id = request.args.get('id')
+            db.execute('DELETE FROM establecimientos WHERE id = ?', (id,))
+            return jsonify({"status": "ok"})
+    except Exception as e:
+        print(f"Error in establecimientos: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/profesionales', methods=['GET', 'POST', 'DELETE'])
 def profesionales():
     if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
-    db = get_db()
+    try:
+        db = get_db()
 
-    if request.method == 'GET':
-        rows = db.execute('SELECT * FROM profesionales ORDER BY nombre')
-        results = []
-        for row in rows:
-            item = dict(row) if not isinstance(row, dict) else row
-            if 'id' in item: item['db_id'] = item['id']
-            if 'establecimientos' in item and isinstance(item['establecimientos'], str):
-                try: item['establecimientos'] = json.loads(item['establecimientos'])
-                except: pass
-            results.append(item)
-        return jsonify(results)
+        if request.method == 'GET':
+            rows = db.execute('SELECT * FROM profesionales ORDER BY nombre')
+            results = []
+            for row in rows:
+                item = dict(row) if not isinstance(row, dict) else row
+                if 'id' in item: item['db_id'] = item['id']
+                if 'establecimientos' in item and isinstance(item['establecimientos'], str):
+                    try: item['establecimientos'] = json.loads(item['establecimientos'])
+                    except: pass
+                results.append(item)
+            return jsonify(results)
 
-    if request.method == 'POST':
-        data = request.json
-        estabs_json = json.dumps(data['establecimientos'])
-        if 'id' in data:
-            db.execute('UPDATE profesionales SET nombre=?, profesion=?, establecimientos=?, obs=? WHERE id=?', 
-                      (data['nombre'], data['profesion'], estabs_json, data['obs'], data['id']))
-        else:
-            db.execute('INSERT INTO profesionales (nombre, profesion, establecimientos, obs) VALUES (?, ?, ?, ?)', 
-                      (data['nombre'], data['profesion'], estabs_json, data['obs']))
-        return jsonify({"status": "ok"})
+        if request.method == 'POST':
+            data = request.json
+            estabs_json = json.dumps(data['establecimientos'])
+            if 'id' in data:
+                db.execute('UPDATE profesionales SET nombre=?, profesion=?, establecimientos=?, obs=? WHERE id=?', 
+                          (data['nombre'], data['profesion'], estabs_json, data['obs'], data['id']))
+            else:
+                db.execute('INSERT INTO profesionales (nombre, profesion, establecimientos, obs) VALUES (?, ?, ?, ?)', 
+                          (data['nombre'], data['profesion'], estabs_json, data['obs']))
+            return jsonify({"status": "ok"})
 
-    if request.method == 'DELETE':
-        id = request.args.get('id')
-        db.execute('DELETE FROM profesionales WHERE id = ?', (id,))
-        return jsonify({"status": "ok"})
+        if request.method == 'DELETE':
+            id = request.args.get('id')
+            db.execute('DELETE FROM profesionales WHERE id = ?', (id,))
+            return jsonify({"status": "ok"})
+    except Exception as e:
+        print(f"Error in profesionales: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/reset', methods=['POST'])
+def reset_db():
+    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
+    try:
+        db = get_db()
+        # Delete all data but keep admin user
+        db.execute('DELETE FROM establecimientos')
+        db.execute('DELETE FROM profesionales')
+        db.execute('DELETE FROM rondas_minimas')
+        db.execute('DELETE FROM distribuciones')
+        return jsonify({"status": "cleared"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/rondas', methods=['GET', 'POST', 'DELETE'])
 def rondas():
