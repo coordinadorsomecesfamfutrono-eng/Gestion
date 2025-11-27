@@ -94,8 +94,6 @@ class TursoDB:
             return rs.last_insert_rowid
         except Exception as e:
             raise e
-        finally:
-            self.client.close()
 
     def execute_many(self, query, params_list):
         # Turso client sync no tiene executemany nativo simple, iteramos
@@ -104,8 +102,6 @@ class TursoDB:
                 self.client.execute(query, params)
         except Exception as e:
             raise e
-        finally:
-            self.client.close()
 
     def fetch_one(self, query, params=()):
         try:
@@ -122,8 +118,6 @@ class TursoDB:
             return item
         except Exception as e:
             raise e
-        finally:
-            self.client.close()
 
 # --- Init DB ---
 def init_db():
