@@ -96,10 +96,8 @@ class TursoDB:
     def execute_many(self, query, params_list):
         # Turso client sync no tiene executemany nativo simple, iteramos
         try:
-            batch = self.client.batch()
             for params in params_list:
-                batch.execute(query, params)
-            batch.commit()
+                self.client.execute(query, params)
         except Exception as e:
             raise e
 
@@ -255,20 +253,19 @@ def seed():
             log.append(f"Usuarios exists ({count})")
 
         # 2. Establecimientos
+        # Siempre intentamos insertar (INSERT OR IGNORE) para asegurar que estén todos
+        establecimientos = [
+            ('NONTUELA', 6, None), ('LLIFEN', 4, None), ('MAIHUE', 4, None),
+            ('CURRIÑE', 4, None), ('CHABRANCO', 4, 'LUNES_A_JUEVES'),
+            ('HUEINAHUE', 3, 'SOLO_MIERCOLES'), ('ARQUILHUE', 3, None),
+            ('ISLA HUAPI', 3, 'MARTES_Y_JUEVES_1_3'), ('CECOSF', 5, None),
+            ('LONCOPAN', 5, None), ('LAS QUEMAS', 2, None), ('CAUNAHUE', 2, None)
+        ]
+        db.execute_many('INSERT OR IGNORE INTO establecimientos (nombre, boxes, restriccion) VALUES (?, ?, ?)', establecimientos)
+        
         res = db.fetch_one('SELECT count(*) as c FROM establecimientos')
         count = res['c'] if isinstance(res, dict) else res[0]
-        if count == 0:
-            establecimientos = [
-                ('NONTUELA', 6, None), ('LLIFEN', 4, None), ('MAIHUE', 4, None),
-                ('CURRIÑE', 4, None), ('CHABRANCO', 4, 'LUNES_A_JUEVES'),
-                ('HUEINAHUE', 3, 'SOLO_MIERCOLES'), ('ARQUILHUE', 3, None),
-                ('ISLA HUAPI', 3, 'MARTES_Y_JUEVES_1_3'), ('CECOSF', 5, None),
-                ('LONCOPAN', 5, None), ('LAS QUEMAS', 2, None), ('CAUNAHUE', 2, None)
-            ]
-            db.execute_many('INSERT INTO establecimientos (nombre, boxes, restriccion) VALUES (?, ?, ?)', establecimientos)
-            log.append("Establecimientos seeded")
-        else:
-            log.append(f"Establecimientos exists ({count})")
+        log.append(f"Establecimientos synced (Total: {count})")
 
         # 3. Profesionales
         res = db.fetch_one('SELECT count(*) as c FROM profesionales')
