@@ -304,30 +304,6 @@ def distribuciones():
 @app.route('/api/establecimientos', methods=['GET', 'POST', 'DELETE'])
 def establecimientos():
     if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
-    db = get_db()
-
-    if request.method == 'GET':
-        rows = db.execute('SELECT * FROM establecimientos ORDER BY nombre')
-        results = []
-        for row in rows:
-            item = dict(row) if not isinstance(row, dict) else row
-            if 'id' in item: item['db_id'] = item['id']
-            results.append(item)
-        return jsonify(results)
-
-    if request.method == 'POST':
-        data = request.json
-        if 'id' in data:
-            db.execute('UPDATE establecimientos SET nombre=?, boxes=?, restriccion=? WHERE id=?', 
-                      (data['nombre'], data['boxes'], data['restriccion'], data['id']))
-        else:
-            db.execute('INSERT INTO establecimientos (nombre, boxes, restriccion) VALUES (?, ?, ?)', 
-                      (data['nombre'], data['boxes'], data['restriccion']))
-        return jsonify({"status": "ok"})
-
-@app.route('/api/establecimientos', methods=['GET', 'POST', 'DELETE'])
-def establecimientos():
-    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
     try:
         db = get_db()
 
