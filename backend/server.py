@@ -125,84 +125,18 @@ def init_db():
     print(f"Inicializando DB usando: {'TURSO' if isinstance(db, TursoDB) else 'LOCAL SQLITE'}")
     
     try:
-        # Tablas
+        # SOLO crear tablas - SIN seeds para evitar timeouts
         db.execute('CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL)')
         db.execute('CREATE TABLE IF NOT EXISTS distribuciones (id INTEGER PRIMARY KEY AUTOINCREMENT, mes INTEGER, anio INTEGER, data TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
         db.execute('CREATE TABLE IF NOT EXISTS establecimientos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT UNIQUE NOT NULL, boxes INTEGER DEFAULT 1, restriccion TEXT)')
         db.execute('CREATE TABLE IF NOT EXISTS profesionales (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, profesion TEXT NOT NULL, establecimientos TEXT, obs TEXT)')
         db.execute('CREATE TABLE IF NOT EXISTS rondas_minimas (id INTEGER PRIMARY KEY AUTOINCREMENT, profesion TEXT NOT NULL, establecimiento TEXT NOT NULL, cantidad INTEGER DEFAULT 0)')
-
-        # Seed Admin
-        res = db.fetch_one('SELECT count(*) as c FROM usuarios')
-        count = res['c'] if isinstance(res, dict) else res[0]
-        if count == 0:
-            print("Seeding admin user...")
-            pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
-            db.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
-
-        # Seed Establecimientos
-        res = db.fetch_one('SELECT count(*) as c FROM establecimientos')
-        count = res['c'] if isinstance(res, dict) else res[0]
-        if count == 0:
-            print("Seeding establecimientos...")
-            establecimientos = [
-                ('NONTUELA', 6, None), ('LLIFEN', 4, None), ('MAIHUE', 4, None),
-                ('CURRIÑE', 4, None), ('CHABRANCO', 4, 'LUNES_A_JUEVES'),
-                ('HUEINAHUE', 3, 'SOLO_MIERCOLES'), ('ARQUILHUE', 3, None),
-                ('ISLA HUAPI', 3, 'MARTES_Y_JUEVES_1_3'), ('CECOSF', 5, None),
-                ('LONCOPAN', 5, None), ('LAS QUEMAS', 2, None), ('CAUNAHUE', 2, None)
-            ]
-            db.execute_many('INSERT INTO establecimientos (nombre, boxes, restriccion) VALUES (?, ?, ?)', establecimientos)
-
-        # Seed Profesionales
-        res = db.fetch_one('SELECT count(*) as c FROM profesionales')
-        count = res['c'] if isinstance(res, dict) else res[0]
-        if count == 0:
-            print("Seeding profesionales...")
-            profesionales = [
-                ('ROBERTO', 'MEDICO', '["CECOSF", "LONCOPAN"]', None),
-                ('FABIAN', 'MEDICO', '["ISLA HUAPI"]', None),
-                ('EMILIO', 'MEDICO', '["LLIFEN", "ARQUILHUE", "CAUNAHUE"]', None),
-                ('CANELO', 'MEDICO', '["CURRIÑE", "MAIHUE", "CHABRANCO", "HUEINAHUE"]', None),
-                ('DRA. CARO', 'MEDICO', '["NONTUELA", "LAS QUEMAS"]', None),
-                ('DR. SEBA', 'MEDICO', '["NONTUELA"]', None),
-                ('STEPHANIE', 'MATRON', '["CECOSF", "LONCOPAN", "ISLA HUAPI"]', None),
-                ('MATRONA NONTUELA', 'MATRON', '["NONTUELA"]', None),
-                ('VALERIA', 'ODONTOLOGO', '["LLIFEN"]', 'SOLO ASISTE LUNES MARTES Y MIERCOLES'),
-                ('JUAN PABLO', 'ODONTOLOGO', '["LLIFEN", "CURRIÑE", "MAIHUE", "HUEINAHUE"]', 'SOLO ASISTE JUEVES Y VIERNES'),
-                ('ODONT. NONTUELA', 'ODONTOLOGO', '["NONTUELA"]', None),
-                ('ENF. NONTUELA', 'ENFERMERO', '["NONTUELA"]', None),
-                ('A. SOCIAL NONTUELA', 'ASISTENTE_SOCIAL', '["NONTUELA"]', None),
-                ('NUTRI NONTUELA', 'NUTRICIONISTA', '["NONTUELA"]', None),
-                ('PSICO NONTUELA', 'PSICOLOGO', '["NONTUELA"]', None)
-            ]
-            db.execute_many('INSERT INTO profesionales (nombre, profesion, establecimientos, obs) VALUES (?, ?, ?, ?)', profesionales)
-
-        # Seed Rondas
-        res = db.fetch_one('SELECT count(*) as c FROM rondas_minimas')
-        count = res['c'] if isinstance(res, dict) else res[0]
-        if count == 0:
-            print("Seeding rondas minimas...")
-            rondas = [
-                ('MEDICO', 'CECOSF', 15), ('MEDICO', 'LONCOPAN', 15), ('MEDICO', 'ISLA HUAPI', 4),
-                ('MEDICO', 'HUEINAHUE', 4), ('MEDICO', 'LLIFEN', 10), ('MEDICO', 'CURRIÑE', 8),
-                ('MEDICO', 'MAIHUE', 8), ('MEDICO', 'NONTUELA', 20), ('MEDICO', 'LAS QUEMAS', 4),
-                ('MEDICO', 'ARQUILHUE', 4), ('MEDICO', 'CAUNAHUE', 4),
-                ('MATRON', 'CECOSF', 10), ('MATRON', 'LONCOPAN', 10), ('MATRON', 'ISLA HUAPI', 4),
-                ('MATRON', 'NONTUELA', 15),
-                ('ODONTOLOGO', 'LLIFEN', 12), ('ODONTOLOGO', 'CURRIÑE', 6),
-                ('ODONTOLOGO', 'MAIHUE', 6), ('ODONTOLOGO', 'NONTUELA', 15),
-                ('ENFERMERO', 'NONTUELA', 20), ('NUTRICIONISTA', 'NONTUELA', 10),
-                ('PSICOLOGO', 'NONTUELA', 10), ('ASISTENTE_SOCIAL', 'NONTUELA', 10)
-            ]
-            db.execute_many('INSERT INTO rondas_minimas (profesion, establecimiento, cantidad) VALUES (?, ?, ?)', rondas)
-
+        print("Tablas creadas exitosamente")
     except Exception as e:
         print(f"Error inicializando base de datos: {e}")
 
-# Ejecutar init_db al inicio (en Vercel esto corre al arrancar la instancia)
-# DESACTIVADO: estaba causando timeouts en cada cold start
-# init_db()
+# Ejecutar init_db al inicio (ahora es RAPIDO - solo crea tablas)
+init_db()
 
 # --- Auth Helper ---
 def check_auth():
@@ -275,26 +209,18 @@ def seed():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e), "log": log}), 500
 
-@app.route('/api/quick-admin', methods=['GET'])
-def quick_admin():
-    """Endpoint super rapido: recrea admin SIN llamar init_db"""
+@app.route('/api/setup', methods=['GET'])
+def setup():
+    """Crear usuario admin - llamar UNA VEZ después del deploy"""
     try:
-        if TURSO_AVAILABLE and TURSO_URL and TURSO_TOKEN:
-            client = libsql_client.create_client_sync(url=TURSO_URL, auth_token=TURSO_TOKEN)
-            client.execute('DELETE FROM usuarios')
-            pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
-            client.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
-            return jsonify({"status": "ok", "message": "Admin recreated via Turso"})
-        else:
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
-            c.execute('DELETE FROM usuarios')
-            pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
-            c.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
-            conn.commit()
-            conn.close()
-            return jsonify({"status": "ok", "message": "Admin recreated via SQLite"})
+        db = get_db()
+        pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
+        db.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
+        return jsonify({"status": "ok", "message": "Admin user created. You can now login with admin/cesfam2025"})
     except Exception as e:
+        # Si ya existe, no es error
+        if "UNIQUE constraint failed" in str(e) or "already exists" in str(e).lower():
+            return jsonify({"status": "ok", "message": "Admin user already exists"})
         return jsonify({"status": "error", "error": str(e)}), 500
 
 @app.route('/api/force-admin', methods=['GET'])
