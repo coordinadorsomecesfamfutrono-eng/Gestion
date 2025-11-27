@@ -280,6 +280,38 @@ def seed():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e), "log": log}), 500
 
+@app.route('/api/force-admin', methods=['GET'])
+def force_admin():
+    """Endpoint de emergencia: borra y recrea el usuario admin"""
+    log = []
+    try:
+        db = get_db()
+        log.append(f"DB Type: {'TURSO' if isinstance(db, TursoDB) else 'LOCAL'}")
+        
+        # 1. Borrar todos los usuarios
+        db.execute('DELETE FROM usuarios')
+        log.append("Deleted all users")
+        
+        # 2. Crear admin con hash correcto
+        pwd_hash = hashlib.sha256("cesfam2025".encode()).hexdigest()
+        log.append(f"Password hash: {pwd_hash}")
+        
+        db.execute('INSERT INTO usuarios (username, password) VALUES (?, ?)', ('admin', pwd_hash))
+        log.append("Admin user created")
+        
+        # 3. Verificar que existe
+        user = db.fetch_one('SELECT id, username, password FROM usuarios WHERE username = ?', ('admin',))
+        if user:
+            user_dict = dict(user) if not isinstance(user, dict) else user
+            log.append(f"Verification: User exists with id={user_dict.get('id')}, hash matches={user_dict.get('password') == pwd_hash}")
+        else:
+            log.append("ERROR: User was not created!")
+        
+        return jsonify({"status": "completed", "log": log})
+    except Exception as e:
+        log.append(f"Exception: {str(e)}")
+        return jsonify({"status": "error", "error": str(e), "log": log}), 500
+
 
 
 @app.route('/api/login', methods=['POST'])
