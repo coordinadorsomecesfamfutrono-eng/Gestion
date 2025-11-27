@@ -401,6 +401,42 @@ def cambiar_password():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# Quick user creation endpoint (temporary workaround)
+@app.route('/api/crear-usuario-simple', methods=['GET'])
+def crear_usuario_simple():
+    """Crear usuario desde URL - solo para admin"""
+    if not check_admin():
+        return jsonify({"error": "Solo administradores pueden crear usuarios"}), 403
+    
+    usuario = request.args.get('usuario')
+    password = request.args.get('password')
+    role = request.args.get('role', 'user')
+    
+    if not usuario or not password:
+        return jsonify({
+            "error": "Faltan parámetros",
+            "uso": "/api/crear-usuario-simple?usuario=nombre&password=pass&role=user"
+        }), 400
+    
+    if role not in ['admin', 'user']:
+        return jsonify({"error": "role debe ser 'admin' o 'user'"}), 400
+    
+    try:
+        pwd_hash = hashlib.sha256(password.encode()).hexdigest()
+        db = get_db()
+        db.execute('INSERT INTO usuarios (username, password, role) VALUES (?, ?, ?)', 
+                   (usuario, pwd_hash, role))
+        return jsonify({
+            "status": "ok",
+            "mensaje": f"✅ Usuario '{usuario}' creado exitosamente",
+            "role": role,
+            "password_original": password
+        })
+    except Exception as e:
+        if "UNIQUE constraint" in str(e):
+            return jsonify({"error": f"El usuario '{usuario}' ya existe"}), 400
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/api/distribuciones', methods=['GET', 'POST', 'DELETE'])
 def distribuciones():
