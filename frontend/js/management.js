@@ -8,22 +8,29 @@ var Management = {
 
   async cargarDatos() {
     try {
-      // Cargar todo en paralelo
-      const [estabs, profs, rondas] = await Promise.all([
-        fetch('/api/establecimientos', { headers: Auth.getHeaders() }).then(r => r.json()),
-        fetch('/api/profesionales', { headers: Auth.getHeaders() }).then(r => r.json()),
-        fetch('/api/rondas', { headers: Auth.getHeaders() }).then(r => r.json())
+      const headers = Auth.getHeaders();
+
+      const [estabsRes, profsRes, rondasRes] = await Promise.all([
+        fetch('/api/establecimientos', { headers }),
+        fetch('/api/profesionales', { headers }),
+        fetch('/api/rondas', { headers })
       ]);
 
-      // Actualizar DataStore local para compatibilidad
-      DataStore.establecimientos = estabs;
-      DataStore.profesionales = profs;
-      DataStore.rondasMinimas = rondas;
+      const estabs = estabsRes.ok ? await estabsRes.json() : [];
+      const profs = profsRes.ok ? await profsRes.json() : [];
+      const rondas = rondasRes.ok ? await rondasRes.json() : [];
 
-      console.log('Datos cargados desde API:', { estabs, profs, rondas });
+      // Validar que sean arrays
+      DataStore.establecimientos = Array.isArray(estabs) ? estabs : [];
+      DataStore.profesionales = Array.isArray(profs) ? profs : [];
+      DataStore.rondasMinimas = Array.isArray(rondas) ? rondas : [];
+
+      if (!Array.isArray(profs)) console.error('Error: Profesionales no es array', profs);
+
+      console.log('Datos cargados:', { estabs: DataStore.establecimientos.length, profs: DataStore.profesionales.length });
     } catch (error) {
       console.error('Error cargando datos:', error);
-      UI.showToast('Error cargando datos del servidor', 'error');
+      UI.showToast('Error cargando datos', 'error');
     }
   },
 
