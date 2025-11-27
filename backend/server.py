@@ -116,8 +116,9 @@ class TursoDB:
             for i, val in enumerate(row):
                 item[cols[i]] = val
             return item
-        finally:
-            self.client.close()
+            return item
+        except Exception as e:
+            raise e
 
 # --- Init DB ---
 def init_db():
