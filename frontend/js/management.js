@@ -11,9 +11,9 @@ var Management = {
       const headers = Auth.getHeaders();
 
       const [estabsRes, profsRes, rondasRes] = await Promise.all([
-        fetch('/api/establecimientos', { headers }),
-        fetch('/api/profesionales', { headers }),
-        fetch('/api/rondas', { headers })
+        fetch('/api/establecimientos', { headers, cache: 'no-store' }),
+        fetch('/api/profesionales', { headers, cache: 'no-store' }),
+        fetch('/api/rondas', { headers, cache: 'no-store' })
       ]);
 
       const estabs = estabsRes.ok ? await estabsRes.json() : [];
