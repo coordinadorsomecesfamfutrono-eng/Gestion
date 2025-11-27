@@ -34,11 +34,23 @@ SESSIONS = {}
 
 def get_db():
     """Retorna un objeto conexión unificado (Local o Turso)"""
-    if TURSO_AVAILABLE and TURSO_URL and TURSO_TOKEN:
-        return TursoDB()
-    return LocalDB()
+    if 'db' not in g:
+        if TURSO_AVAILABLE and TURSO_URL and TURSO_TOKEN:
+            g.db = TursoDB()
+        else:
+            g.db = LocalDB()
+    return g.db
+
+@app.teardown_appcontext
+def close_db(error):
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
 
 class LocalDB:
+    def close(self):
+        pass # LocalDB abre y cierra por query
+
     def execute(self, query, params=()):
         conn = sqlite3.connect(DB_FILE)
         conn.row_factory = sqlite3.Row
@@ -74,6 +86,9 @@ class LocalDB:
 class TursoDB:
     def __init__(self):
         self.client = libsql_client.create_client_sync(url=TURSO_URL, auth_token=TURSO_TOKEN)
+
+    def close(self):
+        self.client.close()
 
     def execute(self, query, params=()):
         try:
@@ -113,7 +128,6 @@ class TursoDB:
             item = {}
             for i, val in enumerate(row):
                 item[cols[i]] = val
-            return item
             return item
         except Exception as e:
             raise e
