@@ -81,7 +81,7 @@ class TursoDB:
             rs = self.client.execute(query, params)
             if query.strip().upper().startswith('SELECT'):
                 # Convertir filas a diccionarios para compatibilidad
-                cols = [c.name for c in rs.columns]
+                cols = list(rs.columns)
                 results = []
                 for row in rs.rows:
                     item = {}
@@ -110,7 +110,7 @@ class TursoDB:
                 return None
             
             # Convertir a dict
-            cols = [c.name for c in rs.columns]
+            cols = list(rs.columns)
             row = rs.rows[0]
             item = {}
             for i, val in enumerate(row):
