@@ -438,23 +438,6 @@ def crear_usuario_simple():
         return jsonify({"error": str(e)}), 500
         return jsonify({"error": str(e)}), 500
 
-# Temporary reset endpoint
-@app.route('/api/reset-data', methods=['POST'])
-def reset_data():
-    """Borra todos los datos excepto usuarios"""
-    if not check_admin():
-        return jsonify({"error": "Unauthorized"}), 403
-    
-    try:
-        db = get_db()
-        db.execute('DELETE FROM distribuciones')
-        db.execute('DELETE FROM rondas_minimas')
-        db.execute('DELETE FROM profesionales')
-        db.execute('DELETE FROM establecimientos')
-        return jsonify({"status": "ok", "message": "Base de datos limpia (usuarios conservados)"})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
 
 @app.route('/api/distribuciones', methods=['GET', 'POST', 'DELETE'])
 def distribuciones():
