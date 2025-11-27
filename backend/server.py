@@ -135,8 +135,14 @@ def init_db():
     except Exception as e:
         print(f"Error inicializando base de datos: {e}")
 
-# Ejecutar init_db al inicio (ahora es RAPIDO - solo crea tablas)
-init_db()
+# DESACTIVADO TEMPORALMENTE - causando problemas de timeout
+# init_db()
+
+# --- Diagnostic Endpoint ---
+@app.route('/api/ping', methods=['GET'])
+def ping():
+    """Endpoint minimo para verificar que el servidor esta vivo"""
+    return jsonify({"status": "alive", "message": "Server is running"})
 
 # --- Auth Helper ---
 def check_auth():
