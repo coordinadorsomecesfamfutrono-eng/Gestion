@@ -138,11 +138,25 @@ def init_db():
 # DESACTIVADO TEMPORALMENTE - causando problemas de timeout
 # init_db()
 
-# --- Diagnostic Endpoint ---
+# --- Diagnostic & Setup Endpoints ---
 @app.route('/api/ping', methods=['GET'])
 def ping():
     """Endpoint minimo para verificar que el servidor esta vivo"""
     return jsonify({"status": "alive", "message": "Server is running"})
+
+@app.route('/api/init-tables', methods=['GET'])
+def init_tables():
+    """Crear todas las tablas - llamar UNA VEZ"""
+    try:
+        db = get_db()
+        db.execute('CREATE TABLE IF NOT EXISTS usuarios (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL)')
+        db.execute('CREATE TABLE IF NOT EXISTS distribuciones (id INTEGER PRIMARY KEY AUTOINCREMENT, mes INTEGER, anio INTEGER, data TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)')
+        db.execute('CREATE TABLE IF NOT EXISTS establecimientos (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT UNIQUE NOT NULL, boxes INTEGER DEFAULT 1, restriccion TEXT)')
+        db.execute('CREATE TABLE IF NOT EXISTS profesionales (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, profesion TEXT NOT NULL, establecimientos TEXT, obs TEXT)')
+        db.execute('CREATE TABLE IF NOT EXISTS rondas_minimas (id INTEGER PRIMARY KEY AUTOINCREMENT, profesion TEXT NOT NULL, establecimiento TEXT NOT NULL, cantidad INTEGER DEFAULT 0)')
+        return jsonify({"status": "ok", "message": "All tables created successfully"})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
 
 # --- Auth Helper ---
 def check_auth():
