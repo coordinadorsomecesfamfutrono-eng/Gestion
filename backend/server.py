@@ -221,18 +221,34 @@ def health():
     db_type = 'TURSO' if isinstance(db, TursoDB) else 'LOCAL SQLITE'
     
     try:
+        # Usuarios
         res = db.fetch_one('SELECT count(*) as c FROM usuarios')
         user_count = res['c'] if isinstance(res, dict) else res[0]
+        
+        # Establecimientos
+        res = db.fetch_one('SELECT count(*) as c FROM establecimientos')
+        estab_count = res['c'] if isinstance(res, dict) else res[0]
+        
+        # Profesionales
+        res = db.fetch_one('SELECT count(*) as c FROM profesionales')
+        prof_count = res['c'] if isinstance(res, dict) else res[0]
+        
         status = "OK"
     except Exception as e:
         user_count = -1
+        estab_count = -1
+        prof_count = -1
         status = str(e)
 
     return jsonify({
         "status": status,
         "db_type": db_type,
         "turso_available": TURSO_AVAILABLE,
-        "user_count": user_count
+        "counts": {
+            "usuarios": user_count,
+            "establecimientos": estab_count,
+            "profesionales": prof_count
+        }
     })
 
 @app.route('/api/seed', methods=['GET'])
