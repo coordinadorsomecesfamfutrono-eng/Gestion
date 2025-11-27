@@ -5,6 +5,8 @@ var Distributor = {
         const calendario = this.generarCalendario(mes, anio);
         const asignaciones = [];
         const errores = []; // Para errores de datos (ej. establecimiento no encontrado)
+        const advertencias = [];
+        const ocupacion = {}; // {fecha: {profesional: establecimiento}}
 
         // Para cada profesional
         for (const prof of DataStore.profesionales) {
