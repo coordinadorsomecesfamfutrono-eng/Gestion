@@ -32,25 +32,15 @@ SESSIONS = {}
 
 # --- Database Abstraction ---
 
+# --- Database Abstraction ---
+
 def get_db():
     """Retorna un objeto conexión unificado (Local o Turso)"""
-    if 'db' not in g:
-        if TURSO_AVAILABLE and TURSO_URL and TURSO_TOKEN:
-            g.db = TursoDB()
-        else:
-            g.db = LocalDB()
-    return g.db
-
-@app.teardown_appcontext
-def close_db(error):
-    db = g.pop('db', None)
-    if db is not None:
-        db.close()
+    if TURSO_AVAILABLE and TURSO_URL and TURSO_TOKEN:
+        return TursoDB()
+    return LocalDB()
 
 class LocalDB:
-    def close(self):
-        pass # LocalDB abre y cierra por query
-
     def execute(self, query, params=()):
         conn = sqlite3.connect(DB_FILE)
         conn.row_factory = sqlite3.Row
@@ -87,9 +77,6 @@ class TursoDB:
     def __init__(self):
         self.client = libsql_client.create_client_sync(url=TURSO_URL, auth_token=TURSO_TOKEN)
 
-    def close(self):
-        self.client.close()
-
     def execute(self, query, params=()):
         try:
             # Turso usa ? igual que sqlite
@@ -107,6 +94,8 @@ class TursoDB:
             return rs.last_insert_rowid
         except Exception as e:
             raise e
+        finally:
+            self.client.close()
 
     def execute_many(self, query, params_list):
         # Turso client sync no tiene executemany nativo simple, iteramos
@@ -115,6 +104,8 @@ class TursoDB:
                 self.client.execute(query, params)
         except Exception as e:
             raise e
+        finally:
+            self.client.close()
 
     def fetch_one(self, query, params=()):
         try:
@@ -131,6 +122,8 @@ class TursoDB:
             return item
         except Exception as e:
             raise e
+        finally:
+            self.client.close()
 
 # --- Init DB ---
 def init_db():
